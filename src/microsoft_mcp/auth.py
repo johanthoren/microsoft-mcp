@@ -1,4 +1,5 @@
 import os
+import stat
 import msal
 import pathlib as pl
 from typing import NamedTuple
@@ -24,7 +25,17 @@ def _read_cache() -> str | None:
 
 def _write_cache(content: str) -> None:
     CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_FILE.write_text(content)
+    fd = os.open(
+        str(CACHE_FILE),
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        stat.S_IRUSR | stat.S_IWUSR,
+    )
+    try:
+        os.write(fd, content.encode("utf-8"))
+    finally:
+        os.close(fd)
+    # Ensure permissions are correct even if file existed with wrong perms
+    os.chmod(str(CACHE_FILE), stat.S_IRUSR | stat.S_IWUSR)
 
 
 def get_app() -> msal.PublicClientApplication:

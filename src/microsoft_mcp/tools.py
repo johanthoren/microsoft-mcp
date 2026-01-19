@@ -3,7 +3,9 @@ import datetime as dt
 import pathlib as pl
 from typing import Any, Literal
 from fastmcp import FastMCP
+import httpx
 from . import graph, auth
+from .security import validate_read_path, validate_write_path
 
 mcp = FastMCP("microsoft-mcp")
 
@@ -243,7 +245,7 @@ def create_email_draft(
             [attachments] if isinstance(attachments, str) else attachments
         )
         for file_path in attachment_paths:
-            path = pl.Path(file_path).expanduser().resolve()
+            path = validate_read_path(file_path)
             content_bytes = path.read_bytes()
             att_size = len(content_bytes)
             att_name = path.name
@@ -321,7 +323,7 @@ def send_email(
             [attachments] if isinstance(attachments, str) else attachments
         )
         for file_path in attachment_paths:
-            path = pl.Path(file_path).expanduser().resolve()
+            path = validate_read_path(file_path)
             content_bytes = path.read_bytes()
             att_size = len(content_bytes)
             att_name = path.name
@@ -775,7 +777,7 @@ def list_files(
 @mcp.tool
 def get_file(file_id: str, account_id: str, download_path: str) -> dict[str, Any]:
     """Download a file from OneDrive to local path"""
-    import subprocess
+    path = validate_write_path(download_path)
 
     metadata = graph.request("GET", f"/me/drive/items/{file_id}", account_id)
     if not metadata:
@@ -785,21 +787,17 @@ def get_file(file_id: str, account_id: str, download_path: str) -> dict[str, Any
     if not download_url:
         raise ValueError("No download URL available for this file")
 
-    try:
-        subprocess.run(
-            ["curl", "-L", "-o", download_path, download_url],
-            check=True,
-            capture_output=True,
-        )
+    response = httpx.get(download_url, follow_redirects=True, timeout=60.0)
+    response.raise_for_status()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(response.content)
 
-        return {
-            "path": download_path,
-            "name": metadata.get("name", "unknown"),
-            "size_mb": round(metadata.get("size", 0) / (1024 * 1024), 2),
-            "mime_type": metadata.get("file", {}).get("mimeType") if metadata else None,
-        }
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to download file: {e.stderr.decode()}")
+    return {
+        "path": str(path),
+        "name": metadata.get("name", "unknown"),
+        "size_mb": round(metadata.get("size", 0) / (1024 * 1024), 2),
+        "mime_type": metadata.get("file", {}).get("mimeType") if metadata else None,
+    }
 
 
 @mcp.tool
@@ -807,7 +805,7 @@ def create_file(
     onedrive_path: str, local_file_path: str, account_id: str
 ) -> dict[str, Any]:
     """Upload a local file to OneDrive"""
-    path = pl.Path(local_file_path).expanduser().resolve()
+    path = validate_read_path(local_file_path)
     data = path.read_bytes()
     result = graph.upload_large_file(
         f"/me/drive/root:/{onedrive_path}:", data, account_id
@@ -820,7 +818,7 @@ def create_file(
 @mcp.tool
 def update_file(file_id: str, local_file_path: str, account_id: str) -> dict[str, Any]:
     """Update OneDrive file content from a local file"""
-    path = pl.Path(local_file_path).expanduser().resolve()
+    path = validate_read_path(local_file_path)
     data = path.read_bytes()
     result = graph.upload_large_file(f"/me/drive/items/{file_id}", data, account_id)
     if not result:
@@ -840,6 +838,8 @@ def get_attachment(
     email_id: str, attachment_id: str, save_path: str, account_id: str
 ) -> dict[str, Any]:
     """Download email attachment to a specified file path"""
+    path = validate_write_path(save_path)
+
     result = graph.request(
         "GET", f"/me/messages/{email_id}/attachments/{attachment_id}", account_id
     )
@@ -851,7 +851,6 @@ def get_attachment(
         raise ValueError("Attachment content not available")
 
     # Save attachment to file
-    path = pl.Path(save_path).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     content_bytes = base64.b64decode(result["contentBytes"])
     path.write_bytes(content_bytes)
