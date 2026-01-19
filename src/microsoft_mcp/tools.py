@@ -1,7 +1,7 @@
 import base64
 import datetime as dt
 import pathlib as pl
-from typing import Any
+from typing import Any, Literal
 from fastmcp import FastMCP
 from . import graph, auth
 
@@ -217,13 +217,14 @@ def create_email_draft(
     body: str,
     cc: str | list[str] | None = None,
     attachments: str | list[str] | None = None,
+    content_type: Literal["Text", "HTML"] = "Text",
 ) -> dict[str, Any]:
     """Create an email draft with file path(s) as attachments"""
     to_list = [to] if isinstance(to, str) else to
 
     message = {
         "subject": subject,
-        "body": {"contentType": "Text", "content": body},
+        "body": {"contentType": content_type, "content": body},
         "toRecipients": [{"emailAddress": {"address": addr}} for addr in to_list],
     }
 
@@ -293,13 +294,14 @@ def send_email(
     body: str,
     cc: str | list[str] | None = None,
     attachments: str | list[str] | None = None,
+    content_type: Literal["Text", "HTML"] = "Text",
 ) -> dict[str, str]:
     """Send an email immediately with file path(s) as attachments"""
     to_list = [to] if isinstance(to, str) else to
 
     message = {
         "subject": subject,
-        "body": {"contentType": "Text", "content": body},
+        "body": {"contentType": content_type, "content": body},
         "toRecipients": [{"emailAddress": {"address": addr}} for addr in to_list],
     }
 
@@ -353,7 +355,7 @@ def send_email(
         to_list = [to] if isinstance(to, str) else to
         message = {
             "subject": subject,
-            "body": {"contentType": "Text", "content": body},
+            "body": {"contentType": content_type, "content": body},
             "toRecipients": [{"emailAddress": {"address": addr}} for addr in to_list],
         }
         if cc:
@@ -454,19 +456,29 @@ def move_email(
 
 
 @mcp.tool
-def reply_to_email(account_id: str, email_id: str, body: str) -> dict[str, str]:
+def reply_to_email(
+    account_id: str,
+    email_id: str,
+    body: str,
+    content_type: Literal["Text", "HTML"] = "Text",
+) -> dict[str, str]:
     """Reply to an email (sender only)"""
     endpoint = f"/me/messages/{email_id}/reply"
-    payload = {"message": {"body": {"contentType": "Text", "content": body}}}
+    payload = {"message": {"body": {"contentType": content_type, "content": body}}}
     graph.request("POST", endpoint, account_id, json=payload)
     return {"status": "sent"}
 
 
 @mcp.tool
-def reply_all_email(account_id: str, email_id: str, body: str) -> dict[str, str]:
+def reply_all_email(
+    account_id: str,
+    email_id: str,
+    body: str,
+    content_type: Literal["Text", "HTML"] = "Text",
+) -> dict[str, str]:
     """Reply to all recipients of an email"""
     endpoint = f"/me/messages/{email_id}/replyAll"
-    payload = {"message": {"body": {"contentType": "Text", "content": body}}}
+    payload = {"message": {"body": {"contentType": content_type, "content": body}}}
     graph.request("POST", endpoint, account_id, json=payload)
     return {"status": "sent"}
 
@@ -524,6 +536,7 @@ def create_event(
     body: str | None = None,
     attendees: str | list[str] | None = None,
     timezone: str = "UTC",
+    content_type: Literal["Text", "HTML"] = "Text",
 ) -> dict[str, Any]:
     """Create a calendar event"""
     event = {
@@ -536,7 +549,7 @@ def create_event(
         event["location"] = {"displayName": location}
 
     if body:
-        event["body"] = {"contentType": "Text", "content": body}
+        event["body"] = {"contentType": content_type, "content": body}
 
     if attendees:
         attendees_list = [attendees] if isinstance(attendees, str) else attendees
@@ -552,7 +565,10 @@ def create_event(
 
 @mcp.tool
 def update_event(
-    event_id: str, updates: dict[str, Any], account_id: str
+    event_id: str,
+    updates: dict[str, Any],
+    account_id: str,
+    content_type: Literal["Text", "HTML"] = "Text",
 ) -> dict[str, Any]:
     """Update event properties"""
     formatted_updates = {}
@@ -572,7 +588,10 @@ def update_event(
     if "location" in updates:
         formatted_updates["location"] = {"displayName": updates["location"]}
     if "body" in updates:
-        formatted_updates["body"] = {"contentType": "Text", "content": updates["body"]}
+        formatted_updates["body"] = {
+            "contentType": content_type,
+            "content": updates["body"],
+        }
 
     result = graph.request(
         "PATCH", f"/me/events/{event_id}", account_id, json=formatted_updates
@@ -582,11 +601,19 @@ def update_event(
 
 @mcp.tool
 def delete_event(
-    account_id: str, event_id: str, send_cancellation: bool = True
+    account_id: str,
+    event_id: str,
+    send_cancellation: bool = True,
+    comment: str | None = None,
 ) -> dict[str, str]:
     """Delete or cancel a calendar event"""
     if send_cancellation:
-        graph.request("POST", f"/me/events/{event_id}/cancel", account_id, json={})
+        graph.request(
+            "POST",
+            f"/me/events/{event_id}/cancel",
+            account_id,
+            json={"Comment": comment or ""},
+        )
     else:
         graph.request("DELETE", f"/me/events/{event_id}", account_id)
     return {"status": "deleted"}
